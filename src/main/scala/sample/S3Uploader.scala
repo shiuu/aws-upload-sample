@@ -2,12 +2,13 @@ package sample
 
 import java.io.File
 
-import com.amazonaws.auth.BasicAWSCredentials
+import com.amazonaws.auth.{AWSStaticCredentialsProvider, BasicAWSCredentials}
 import com.amazonaws.event.ProgressEventType._
 import com.amazonaws.event.{ProgressEvent, ProgressListener}
-import com.amazonaws.services.s3.AmazonS3Client
-import com.amazonaws.services.s3.transfer.TransferManager
+import com.amazonaws.services.s3.AmazonS3ClientBuilder
+import com.amazonaws.services.s3.transfer.TransferManagerBuilder
 import com.amazonaws.services.s3.transfer.model.UploadResult
+
 import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.util.Try
 import scala.util.control.NonFatal
@@ -46,8 +47,8 @@ final class S3Uploader(config: AWSS3Config, io: ExecutionContext) {
   }
 
   /**
-   * Thrown when an upload is canceled.
-   */
+    * Thrown when an upload is canceled.
+    */
   class UploadCancelledException(key: String) extends RuntimeException(key)
 
   private val (s3Client, manager) = {
@@ -55,14 +56,16 @@ final class S3Uploader(config: AWSS3Config, io: ExecutionContext) {
       config.accessKey,
       config.secretAccessKey
     )
+    val client = AmazonS3ClientBuilder
+      .standard()
+      .withCredentials(new AWSStaticCredentialsProvider(credentials))
+      .withRegion(config.region.getFirstRegionId)
+      .build()
 
-    val client = new AmazonS3Client(credentials)
-    client.setRegion(config.region.toAWSRegion)
-
-    val manager = new TransferManager(
-      client,
-      ExecutionContextAsExecutorService(io)
-    )
+    val manager = TransferManagerBuilder
+      .standard()
+      .withS3Client(client)
+      .build()
 
     (client, manager)
   }
