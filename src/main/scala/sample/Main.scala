@@ -1,49 +1,47 @@
 package sample
 
-import java.io.{BufferedOutputStream, FileOutputStream, File}
+import java.io.{BufferedOutputStream, File, FileOutputStream}
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.{TimeUnit, ThreadFactory, Executors}
+import java.util.concurrent.{Executors, ThreadFactory, TimeUnit}
 
-import scala.concurrent.{ExecutionContext, Future, Await}
+import scala.concurrent.{Await, ExecutionContext}
 import scala.concurrent.duration.Duration
 import scala.io.StdIn
-import scala.util.Random
-import scala.util.control.NonFatal
+import scala.util.{Failure, Random, Success}
+import ExecutionContext.Implicits.global
 
 
 object Main {
   def main(args: Array[String]): Unit = {
-    val uploader = new S3Uploader(AWSS3Config.load(), executionContext)
+    val fileNum = 2
+    val maxUploadDuration = Duration(fileNum * 2, TimeUnit.MINUTES)
+    val uploader = new S3Uploader(AWSS3Config.load())
 
     println("Generating big files ...")
-    val files = for (i <- 0 until 20) yield
-      generateBigFile(megabytes = 5)
+    val files = for (i <- 0 until fileNum) yield
+      generateBigFile(megabytes = 1)
 
     println("PRESS ENTER TO UPLOAD ...")
     StdIn.readLine()
 
     val periodicPing = startLiveCheck()
 
-    try {
-      println("Uploading ...")
-      val futures = for (f <- files) yield
-        uploader.upload(s"test/${f.getName}", f)
+    println("Uploading ...")
+    val fut = uploader.uploadFiles(files)
+    fut onComplete {
+      case Success(res) =>
+        println("Successfully uploaded. [Result:] " + res)
+      case Failure(th) =>
+        println("An error has occured: " + th.getMessage)
+    }
 
-      val task = Future.sequence(futures)
-      val uploadResults = Await.result(task, Duration.Inf)
+    Await.result(fut, maxUploadDuration)
 
-      println(uploadResults)
-    }
-    catch {
-      case NonFatal(ex) =>
-        System.err.println(ex.getMessage)
-    }
-    finally {
-      periodicPing.cancel(false)
-      files.foreach(_.delete())
-      uploader.shutdown()
-      System.out.println("SHUTTING DOWN!")
-    }
+    // clean up and shut down
+    periodicPing.cancel(false)
+    files.foreach(_.delete())
+    uploader.shutdown()
+    System.out.println("SHUTTING DOWN!")
   }
 
   /**
@@ -59,23 +57,6 @@ object Main {
         th
       }
     })
-
-  /**
-   * Single threaded execution context used (instead of global).
-   */
-  implicit val executionContext = new ExecutionContext {
-    def execute(runnable: Runnable) =
-      scheduler.execute(new Runnable {
-        def run() = 
-          try runnable.run() catch {
-            case NonFatal(ex) => reportFailure(ex)
-          }
-      })
-
-    def reportFailure(cause: Throwable) = {
-      cause.printStackTrace(System.err)
-    }
-  }
 
   /**
    * A periodic task whose purpose is to check if our thread-pool

@@ -3,70 +3,46 @@ package sample
 import java.io.File
 
 import com.amazonaws.auth.{AWSStaticCredentialsProvider, BasicAWSCredentials}
-import com.amazonaws.event.ProgressEventType._
-import com.amazonaws.event.{ProgressEvent, ProgressListener}
 import com.amazonaws.services.s3.AmazonS3ClientBuilder
-import com.amazonaws.services.s3.transfer.TransferManagerBuilder
+import com.amazonaws.services.s3.transfer.{TransferManagerBuilder, Upload}
 import com.amazonaws.services.s3.transfer.model.UploadResult
 
-import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
-import scala.util.Try
-import scala.util.control.NonFatal
+import scala.concurrent.{ExecutionContext, Future, blocking}
+import ExecutionContext.Implicits.global
 
+final class S3Uploader(config: AWSS3Config) {
+  val credentials = new BasicAWSCredentials(
+    config.accessKey,
+    config.secretAccessKey
+  )
+  val s3Client = AmazonS3ClientBuilder
+    .standard()
+    .withCredentials(new AWSStaticCredentialsProvider(credentials))
+    .withRegion(config.region.getFirstRegionId)
+    .build()
+  val transferManager = TransferManagerBuilder
+    .standard()
+    .withS3Client(s3Client)
+    .build()
 
-final class S3Uploader(config: AWSS3Config, io: ExecutionContext) {
   def upload(key: String, file: File): Future[UploadResult] = {
-    val p = Promise[UploadResult]()
-
-    try {
-      val request = manager.upload(config.bucketName, key, file)
-
-      request.addProgressListener(new ProgressListener {
-        def progressChanged(e: ProgressEvent) = {
-          e.getEventType match {
-            case TRANSFER_COMPLETED_EVENT | TRANSFER_FAILED_EVENT =>
-              p.tryComplete(Try(blocking(request.waitForUploadResult())))
-            case TRANSFER_CANCELED_EVENT =>
-              p.tryFailure(new UploadCancelledException(key))
-            case _ =>
-              () // ignore
-          }
-        }
-      })
+//    println(s"uploading ${file.getName}")
+    Future {
+      val request: Upload = transferManager.upload(config.bucketName, key, file)
+      blocking {
+        request.waitForUploadResult()
+      }
     }
-    catch {
-      case NonFatal(ex) =>
-        Future.failed(ex)
-    }
-
-    p.future
   }
 
-  def shutdown() = {
-    manager.shutdownNow(true)
+  def uploadFiles(files: Seq[File]): Future[Seq[UploadResult]] = {
+    val results = files.map { f =>
+      upload(s"test/${f.getName}", f)
+    }
+    Future.sequence(results)
   }
 
-  /**
-    * Thrown when an upload is canceled.
-    */
-  class UploadCancelledException(key: String) extends RuntimeException(key)
-
-  private val (s3Client, manager) = {
-    val credentials = new BasicAWSCredentials(
-      config.accessKey,
-      config.secretAccessKey
-    )
-    val client = AmazonS3ClientBuilder
-      .standard()
-      .withCredentials(new AWSStaticCredentialsProvider(credentials))
-      .withRegion(config.region.getFirstRegionId)
-      .build()
-
-    val manager = TransferManagerBuilder
-      .standard()
-      .withS3Client(client)
-      .build()
-
-    (client, manager)
+  def shutdown(): Unit = {
+    transferManager.shutdownNow(true)
   }
 }
