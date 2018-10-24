@@ -1,7 +1,7 @@
 # aws-upload-sample
 
-Demonstrates usage of AWS SDK's [TransferManager](docs.aws.amazon.com/AWSJavaSDK/latest/javadoc/com/amazonaws/services/s3/transfer/TransferManager.html) for handling S3 uploads.
-Also demonstrates that Scala Future makes concurrent programming easy in reasoning.
+This example demonstrates usage of AWS SDK's [TransferManager](docs.aws.amazon.com/AWSJavaSDK/latest/javadoc/com/amazonaws/services/s3/transfer/TransferManager.html) for handling S3 uploads.
+It also shows that Scala Futures provide a easy way to reason about concurrent tasks.
 
 ## Configuration
 
